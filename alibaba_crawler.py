@@ -197,55 +197,84 @@ class AlibabaCrawler:
     def extract_products_js(self):
         """使用JavaScript提取商品信息"""
         try:
-            # 使用JavaScript提取商品信息
             products = self.driver.execute_script("""
                 const products = [];
-                // 查找所有可能的商品容器
-                const items = document.querySelectorAll('.sm-offer-item, .offer-item, .grid-item, [data-offer-id]');
+                // 查找所有商品图片（作为入口点）
+                const images = document.querySelectorAll('img.main-img');
                 
-                items.forEach(item => {
+                images.forEach(img => {
                     try {
                         const product = {};
-                        
-                        // 提取图片
-                        const img = item.querySelector('img.main-img');
-                        if (img) {
-                            product.image_url = img.src;
+                        // 获取商品卡片容器（向上查找4层）
+                        let container = img;
+                        for (let i = 0; i < 4; i++) {
+                            container = container.parentElement;
                         }
                         
-                        // 提取标题
-                        const titleEl = item.querySelector('.title') || 
-                                      item.querySelector('[title]') ||
-                                      item.querySelector('div:not([class])');
-                        if (titleEl) {
-                            product.title = titleEl.innerText.trim() || titleEl.getAttribute('title');
-                        }
+                        // 1. 图片URL
+                        product.image_url = img.src;
                         
-                        // 提取价格
-                        const priceItem = item.querySelector('.price-item');
-                        if (priceItem) {
-                            const priceText = priceItem.textContent.trim();
-                            if (priceText) {
-                                product.price = priceText;
+                        // 2. 标题（查找不带class的div，包含商品名称）
+                        const titleDivs = container.querySelectorAll('div:not([class])');
+                        for (const div of titleDivs) {
+                            if (div.textContent.length > 10) {  // 标题通常较长
+                                product.title = div.textContent.trim();
+                                break;
                             }
                         }
                         
-                        // 提取链接
-                        const link = item.querySelector('a[href*="detail.1688.com"]');
+                        // 3. 价格
+                        const priceItem = container.querySelector('.price-item');
+                        if (priceItem) {
+                            const yuan = priceItem.querySelector('div:first-child').textContent;
+                            const mainPrice = priceItem.querySelector('.text-main').textContent;
+                            const decimal = priceItem.querySelector('div:last-child').textContent;
+                            product.price = yuan + mainPrice + decimal;
+                        }
+                        
+                        // 4. 销量（desc-text中包含"已售"的元素）
+                        const descTexts = container.querySelectorAll('.desc-text');
+                        descTexts.forEach(desc => {
+                            const text = desc.textContent.trim();
+                            if (text.includes('已售')) {
+                                product.sales = text;
+                            } else if (text.includes('回头率')) {
+                                product.return_rate = text;
+                            } else if (!text.includes('已售') && !text.includes('回头率')) {
+                                // 可能是供应商信息
+                                product.supplier = text;
+                            }
+                        });
+                        
+                        // 5. 获取链接
+                        const link = container.querySelector('a[href*="detail.1688.com"]');
                         if (link) {
                             product.link = link.href;
                         }
                         
+                        // 只添加有基本信息的商品
                         if (product.title && product.price) {
                             products.push(product);
                         }
                     } catch (e) {
-                        console.error('提取商品信息时出错:', e);
+                        console.error('提取单个商品信息时出错:', e);
                     }
                 });
                 
                 return products;
             """)
+            
+            # 打印提取结果的示例
+            if products:
+                print("\n提取到的商品示例:")
+                sample = products[0]
+                print(f"标题: {sample.get('title', 'N/A')}")
+                print(f"价格: {sample.get('price', 'N/A')}")
+                print(f"销量: {sample.get('sales', 'N/A')}")
+                print(f"供应商: {sample.get('supplier', 'N/A')}")
+                print(f"回头率: {sample.get('return_rate', 'N/A')}")
+                print(f"链接: {sample.get('link', 'N/A')[:50]}...")
+                print(f"图片: {sample.get('image_url', 'N/A')[:50]}...")
             
             return products
         except Exception as e:
@@ -256,7 +285,7 @@ class AlibabaCrawler:
         """备用的提取方法"""
         products = []
         try:
-            # 查找所有图片元素
+            # 通过图片查找商品
             images = self.driver.find_elements(By.CSS_SELECTOR, 'img.main-img')
             print(f"找到 {len(images)} 个商品图片")
             
@@ -267,26 +296,51 @@ class AlibabaCrawler:
                     # 获取图片URL
                     product['image_url'] = img.get_attribute('src')
                     
-                    # 获取父元素
-                    parent = img.find_element(By.XPATH, '../..')
+                    # 获取父容器
+                    container = img
+                    for _ in range(4):
+                        container = container.find_element(By.XPATH, '..')
                     
-                    # 查找标题
-                    try:
-                        title = parent.find_element(By.CSS_SELECTOR, 'div:not([class])')
-                        product['title'] = title.text.strip()
-                    except:
-                        continue
+                    # 提取标题
+                    title_elements = container.find_elements(By.CSS_SELECTOR, 'div:not([class])')
+                    for element in title_elements:
+                        text = element.text.strip()
+                        if len(text) > 10:  # 标题通常较长
+                            product['title'] = text
+                            break
                     
-                    # 查找价格
+                    # 提取价格
+                    price_item = container.find_element(By.CSS_SELECTOR, '.price-item')
+                    if price_item:
+                        yuan = price_item.find_element(By.CSS_SELECTOR, 'div:first-child').text
+                        main_price = price_item.find_element(By.CSS_SELECTOR, '.text-main').text
+                        decimal = price_item.find_element(By.CSS_SELECTOR, 'div:last-child').text
+                        product['price'] = f"{yuan}{main_price}{decimal}"
+                    
+                    # 提取其他信息
+                    desc_texts = container.find_elements(By.CSS_SELECTOR, '.desc-text')
+                    for desc in desc_texts:
+                        text = desc.text.strip()
+                        if '已售' in text:
+                            product['sales'] = text
+                        elif '回头率' in text:
+                            product['return_rate'] = text
+                        else:
+                            product['supplier'] = text
+                    
+                    # 提取链接
                     try:
-                        price_item = parent.find_element(By.CSS_SELECTOR, '.price-item')
-                        product['price'] = price_item.text.strip()
+                        link = container.find_element(By.CSS_SELECTOR, 'a[href*="detail.1688.com"]')
+                        product['link'] = link.get_attribute('href')
                     except:
-                        continue
+                        pass
                     
                     if product.get('title') and product.get('price'):
                         products.append(product)
                         print(f"找到商品: {product['title'][:30]}...")
+                        print(f"价格: {product['price']}")
+                        if product.get('sales'):
+                            print(f"销量: {product['sales']}")
                     
                 except Exception as e:
                     print(f"处理单个商品时出错: {e}")
