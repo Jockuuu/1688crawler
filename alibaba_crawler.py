@@ -65,87 +65,29 @@ class AlibabaCrawler:
     def login_with_cookie(self, cookie_string):
         """使用扫码方式登录1688"""
         try:
-            # 直接访问1688登录页面
-            self.driver.get("https://login.1688.com/member/signin.htm")
-            time.sleep(2)  # 等待页面加载
+            # 直接访问1688主页
+            self.driver.get("https://www.1688.com")
+            time.sleep(2)
             
             print("\n=== 登录指引 ===")
-            print("1. 如果出现滑块验证，请按以下步骤操作：")
-            print("   - 将鼠标移动到滑块上")
-            print("   - 按住滑块慢慢拖动（模拟人工操作）")
-            print("   - 如果失败请多尝试几次")
-            print("2. 在页面上寻找二维码登录选项")
-            print("3. 使用阿里巴巴/淘宝 App扫码登录")
+            print("1. 点击页面右上角的'请登录'按钮")
+            print("2. 在登录界面选择'扫码登录'")
+            print("3. 使用阿里巴巴/淘宝 App扫码")
             print("4. 登录成功后，请按回车继续...")
             input()
             
-            # 验证登录状态
-            print("正在验证登录状态...")
+            # 简化登录验证
+            time.sleep(2)  # 等待页面状态更新
             
-            # 先等待页面跳转到1688主页
-            time.sleep(3)  # 给跳转一些时间
-            
-            # 检查当前URL是否已经跳转到1688域名
-            current_url = self.driver.current_url
-            if not "1688.com" in current_url:
-                print(f"当前页面URL: {current_url}")
-                print("等待页面跳转...")
-                time.sleep(5)  # 多等待一会
-            
-            try:
-                # 尝试多个可能的登录成功标识
-                login_selectors = [
-                    '.user-info',
-                    '.member-name',
-                    '.login-info',
-                    '.user-avatar',
-                    '.header-user-menu',
-                    '.user-account',
-                    'a[href*="member/"]',  # 包含member的链接
-                    '.sm-widget-user'  # 新增可能的选择器
-                ]
-                
-                print("检查登录状态...")
-                for selector in login_selectors:
-                    try:
-                        element = self.wait.until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                        )
-                        print(f"找到登录标识: {selector}")
-                        break
-                    except TimeoutException:
-                        continue
-                else:
-                    print("未找到任何登录标识")
-                    # 尝试访问会员中心页面来验证登录
-                    self.driver.get("https://work.1688.com/")
-                    time.sleep(3)
-                    
-                # 获取所有Cookie
-                cookies = self.driver.get_cookies()
+            # 直接获取Cookie
+            cookies = self.driver.get_cookies()
+            if cookies:
                 cookie_string = '; '.join([f"{cookie['name']}={cookie['value']}" for cookie in cookies])
-                
-                # 验证Cookie是否包含关键值
-                if any(cookie['name'] in ['_csrf_token', 'cookie2', '_tb_token_'] for cookie in cookies):
-                    print("成功获取有效Cookie！")
-                    return cookie_string
-                else:
-                    print("Cookie可能无效，请检查登录状态")
-                    return None
-                    
-            except Exception as e:
-                print(f"验证登录状态时出错: {e}")
-                print("当前页面URL:", self.driver.current_url)
-                print("尝试重新验证...")
-                
-                # 尝试重新加载页面
-                self.driver.get("https://www.1688.com")
-                time.sleep(3)
-                
-                # 再次获取Cookie
-                cookies = self.driver.get_cookies()
-                cookie_string = '; '.join([f"{cookie['name']}={cookie['value']}" for cookie in cookies])
+                print("成功获取Cookie！")
                 return cookie_string
+            else:
+                print("未获取到Cookie，请确认是否已登录")
+                return None
                 
         except Exception as e:
             print(f"登录过程中出错: {e}")
@@ -154,55 +96,146 @@ class AlibabaCrawler:
     def search_products(self, keyword, max_pages=3):
         """搜索并获取产品信息"""
         all_products = []
-        retry_count = 3  # 添加重试机制
         
         try:
-            search_url = f"https://s.1688.com/selloffer/offer_search.htm?keywords={quote(keyword)}"
+            print(f"正在搜索: {keyword}")
             
-            for attempt in range(retry_count):
+            # 使用urllib.parse.quote正确编码中文关键词
+            encoded_keyword = quote(keyword, encoding='gb2312')  # 1688使用gb2312编码
+            search_url = f"https://s.1688.com/selloffer/offer_search.htm?keywords={encoded_keyword}"
+            print(f"访问URL: {search_url}")  # 调试用
+            
+            try:
+                self.driver.get(search_url)
+            except Exception as e:
+                print(f"访问搜索页面失败: {e}")
+                # 尝试备用方法
+                backup_url = f"https://s.1688.com/selloffer/offer_search.htm?keywords={quote(keyword)}"
+                print(f"尝试备用URL: {backup_url}")
+                self.driver.get(backup_url)
+            
+            time.sleep(3)  # 等待页面加载
+            
+            # 检查URL是否正确加载
+            current_url = self.driver.current_url
+            print(f"当前页面URL: {current_url}")
+            
+            # 如果URL不包含关键词，可能需要手动处理
+            if "keywords" not in current_url:
+                print("搜索页面可能未正确加载，尝试直接在搜索框输入")
                 try:
-                    self.driver.get(search_url)
-                    break
+                    # 尝试找到搜索框并输入
+                    search_input = self.wait.until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="keywords"], #search-input, .search-input'))
+                    )
+                    search_input.clear()
+                    search_input.send_keys(keyword)
+                    
+                    # 点击搜索按钮
+                    search_button = self.wait.until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.search-button, .search-submit'))
+                    )
+                    search_button.click()
+                    time.sleep(3)
                 except Exception as e:
-                    if attempt == retry_count - 1:
-                        raise
-                    print(f"访问搜索页面失败，正在重试 ({attempt + 1}/{retry_count})")
-                    time.sleep(2)
+                    print(f"手动搜索失败: {e}")
+            
+            # 处理可能出现的验证码
+            print("如果出现验证码，请手动完成验证后按回车继续...")
+            input()
             
             # 处理每一页
             for page in range(1, max_pages + 1):
                 print(f"\n正在处理第 {page} 页...")
                 
-                # 等待商品列表加载完成
-                self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'offer-list-row')))
-                
-                # 滚动页面以加载所有商品
-                self.scroll_page()
-                
-                # 提取商品信息
-                products = self.extract_products()
-                all_products.extend(products)
-                
-                print(f"第 {page} 页获取到 {len(products)} 个商品")
-                
-                # 保存当前页数据
-                self.save_page_data(products, keyword, page)
-                
-                # 处理翻页
-                if page < max_pages:
-                    try:
-                        # 查找并点击下一页按钮
-                        next_button = self.wait.until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, 'a.page-next'))
-                        )
-                        next_button.click()
-                        time.sleep(2)
-                    except TimeoutException:
-                        print("没有找到下一页按钮，可能已经是最后一页")
-                        break
+                # 等待商品列表加载
+                try:
+                    # 尝试多个可能的商品列表选择器
+                    selectors = [
+                        '.offer-list-row',
+                        '.list-content',
+                        '.organic-offer-list',
+                        '.grid-list',
+                        '.sm-offer-item',  # 新增选择器
+                        '.offer-item',     # 新增选择器
+                        '.item-content'    # 新增选择器
+                    ]
+                    
+                    found_selector = None
+                    for selector in selectors:
+                        try:
+                            self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                            print(f"找到商品列表: {selector}")
+                            found_selector = selector
+                            break
+                        except TimeoutException:
+                            continue
+                            
+                    if not found_selector:
+                        print("未找到商品列表，可能需要处理验证码")
+                        print("请处理完验证码后按回车继续...")
+                        input()
+                        continue
+                    
+                    # 滚动页面以加载所有商品
+                    self.scroll_page()
+                    
+                    # 提取商品信息
+                    products = self.extract_products()
+                    if products:
+                        all_products.extend(products)
+                        print(f"第 {page} 页获取到 {len(products)} 个商品")
                         
+                        # 保存当前页数据
+                        self.save_page_data(products, keyword, page)
+                    else:
+                        print("当前页面未找到商品")
+                        break
+                    
+                    # 处理翻页
+                    if page < max_pages:
+                        try:
+                            # 尝试多个翻页按钮选择器
+                            next_selectors = [
+                                'a.page-next',
+                                '.next-page',
+                                'button[aria-label="下一页"]',
+                                '.pagination-next',
+                                '.next',  # 新增选择器
+                                '[title="下一页"]'  # 新增选择器
+                            ]
+                            
+                            clicked = False
+                            for selector in next_selectors:
+                                try:
+                                    next_button = self.wait.until(
+                                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                                    )
+                                    next_button.click()
+                                    clicked = True
+                                    time.sleep(2)
+                                    break
+                                except TimeoutException:
+                                    continue
+                                    
+                            if not clicked:
+                                print("没有找到下一页按钮，可能已经是最后一页")
+                                break
+                                
+                        except Exception as e:
+                            print(f"翻页失败: {e}")
+                            break
+                            
+                except Exception as e:
+                    print(f"处理第 {page} 页时出错: {e}")
+                    print("如果出现验证码，请手动处理后按回车继续...")
+                    input()
+                    continue
+                
         except Exception as e:
             print(f"搜索过程中出错: {e}")
+            print("请检查网页状态，如果需要处理验证码，请处理后按回车继续...")
+            input()
             
         return all_products
         
@@ -224,37 +257,82 @@ class AlibabaCrawler:
             last_height = new_height
             
     def extract_products(self):
-        """
-        提取商品信息
-        使用Selenium的元素定位功能
-        """
+        """提取商品信息"""
         products = []
         
-        # 更新选择器，使用更通用的方式
-        items = self.driver.find_elements(By.CSS_SELECTOR, '.offer-list-row-offer, .list-item')  # 添加备选选择器
+        # 更新选择器，使用更多的可能组合
+        selectors = [
+            '.offer-list-row-offer, .list-item',
+            '.sm-offer-item',
+            '.offer-item',
+            '.item-content'
+        ]
+        
+        items = []
+        for selector in selectors:
+            items.extend(self.driver.find_elements(By.CSS_SELECTOR, selector))
+        
+        if not items:
+            print("未找到商品元素，可能需要更新选择器")
+            return products
         
         for item in items:
             try:
                 # 使用更灵活的选择器组合
+                try:
+                    title = item.find_element(By.CSS_SELECTOR, 
+                        'h2.title, .title a, .title, .item-title').text.strip()
+                except:
+                    continue  # 如果找不到标题，跳过这个商品
+                    
+                try:
+                    price = item.find_element(By.CSS_SELECTOR, 
+                        '.price, .price-container, .price-info').text.strip()
+                except:
+                    price = "价格未知"
+                    
+                try:
+                    min_order = item.find_element(By.CSS_SELECTOR, 
+                        '.min-order, .order-info, .min-quantity').text.strip()
+                except:
+                    min_order = "起订量未知"
+                    
+                try:
+                    company = item.find_element(By.CSS_SELECTOR, 
+                        '.company-name, .company, .store-name').text.strip()
+                except:
+                    company = "商家未知"
+                    
+                try:
+                    location = item.find_element(By.CSS_SELECTOR, 
+                        '.location, .address, .delivery-location').text.strip()
+                except:
+                    location = "地址未知"
+                    
+                try:
+                    link = item.find_element(By.CSS_SELECTOR, 
+                        'a.title-link, .title a, a[href*="detail"]').get_attribute('href')
+                except:
+                    link = ""
+                    
+                try:
+                    image_url = item.find_element(By.CSS_SELECTOR, 
+                        'img.offer-image, .item-image, img[src*="img.alicdn.com"]').get_attribute('src')
+                except:
+                    image_url = ""
+                
                 product = {
-                    'title': item.find_element(By.CSS_SELECTOR, 'h2.title, .title a').text.strip(),
-                    'price': item.find_element(By.CSS_SELECTOR, '.price, .price-container').text.strip(),
-                    'min_order': item.find_element(By.CSS_SELECTOR, '.min-order, .order-info').text.strip(),
-                    'company': item.find_element(By.CSS_SELECTOR, '.company-name, .company').text.strip(),
-                    'location': item.find_element(By.CSS_SELECTOR, '.location, .address').text.strip(),
-                    'link': item.find_element(By.CSS_SELECTOR, 'a.title-link, .title a').get_attribute('href'),
-                    'image_url': item.find_element(By.CSS_SELECTOR, 'img.offer-image, .item-image').get_attribute('src')
+                    'title': title,
+                    'price': price,
+                    'min_order': min_order,
+                    'company': company,
+                    'location': location,
+                    'link': link,
+                    'image_url': image_url
                 }
                 
-                # 下载商品图片
-                if product['image_url']:
-                    product['local_image'] = self.download_image(
-                        product['image_url'],
-                        f"product_{len(products)}_{int(time.time())}.jpg"
-                    )
-                
                 products.append(product)
-                print(f"找到商品: {product['title'][:30]}...")
+                print(f"找到商品: {title[:30]}...")
                 
             except Exception as e:
                 print(f"提取商品信息时出错: {e}")
@@ -312,10 +390,7 @@ class AlibabaCrawler:
         self.driver.quit()
 
 def main():
-    """
-    主函数：程序入口点
-    包含完整的使用流程
-    """
+    """主函数：程序入口点"""
     crawler = AlibabaCrawler()
     
     try:
@@ -327,19 +402,45 @@ def main():
         if not cookie:
             print("获取Cookie失败，程序退出")
             return
-            
-        # 获取爬取参数
-        keyword = input("请输入要搜索的产品关键词: ")
-        max_pages = int(input("请输入要爬取的页数: "))
         
-        # 执行爬取
-        products = crawler.search_products(keyword, max_pages)
-        
-        # 输出结果
-        print(f"\n爬取完成！")
-        print(f"共获取 {len(products)} 个商品信息")
-        print(f"数据保存在 {crawler.output_dir} 目录下")
-        
+        while True:
+            try:
+                # 获取爬取参数
+                keyword = input("\n请输入要搜索的产品关键词（输入q退出）: ").strip()
+                if not keyword:
+                    print("关键词不能为空！")
+                    continue
+                    
+                if keyword.lower() == 'q':
+                    break
+                
+                # 验证输入的关键词
+                print(f"您要搜索的是: {keyword}")
+                if input("确认搜索这个关键词吗？(y/n): ").lower() != 'y':
+                    continue
+                
+                max_pages = input("请输入要爬取的页数（直接回车默认为3页）: ")
+                max_pages = int(max_pages) if max_pages.strip() else 3
+                
+                # 执行爬取
+                products = crawler.search_products(keyword, max_pages)
+                
+                # 输出结果
+                print(f"\n爬取完成！")
+                print(f"共获取 {len(products)} 个商品信息")
+                print(f"数据保存在 {crawler.output_dir} 目录下")
+                
+                # 询问是否继续
+                if input("\n是否继续搜索其他产品？(y/n): ").lower() != 'y':
+                    break
+                    
+            except ValueError:
+                print("请输入有效的页数！")
+            except Exception as e:
+                print(f"发生错误: {e}")
+                if input("是否继续？(y/n): ").lower() != 'y':
+                    break
+                
     finally:
         # 确保浏览器被正确关闭
         crawler.close()
